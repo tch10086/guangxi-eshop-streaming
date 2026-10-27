@@ -106,11 +106,15 @@ def forecast_category(series: pd.DataFrame, days: int):
 
 
 def save_forecast(rows, base_dt: str):
-    """预测结果写回 MySQL（先删同批次再插，保证可重复运行）"""
+    """预测结果写回 MySQL。
+
+    整表重写而不是按 dt 删：预测是"当前快照"，留旧基准日的行会让大屏出现
+    两套预测日期（比如 10-27 和 10-28 各一份），图表就重了。
+    """
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM ads_category_forecast WHERE dt=%s", (base_dt,))
+            cur.execute("DELETE FROM ads_category_forecast")
             if rows:
                 cur.executemany(
                     """INSERT INTO ads_category_forecast

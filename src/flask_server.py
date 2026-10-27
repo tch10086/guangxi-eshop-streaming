@@ -133,14 +133,16 @@ def eshop_data():
                 "SELECT city AS name, SUM(order_cnt) AS value "
                 "FROM dws_eshop_hour_stats GROUP BY city ORDER BY value DESC")
 
-        # ---- 5) 最近 30 分钟成交趋势（实时）----
+        # ---- 5) 最近 2 小时的分钟级成交趋势（实时）----
+        # 不能用 "ORDER BY stat_minute DESC LIMIT 30"：停了几天再跑，会把上周的分钟
+        # 和今天的混在一条线里，横轴时间倒退。这里以最新一条为基准往前取 2 小时。
         minute_rows = query_all(
             """
             SELECT stat_minute, order_cnt, total_amount
             FROM realtime_order_minute
-            ORDER BY stat_minute DESC LIMIT 30
+            WHERE stat_minute >= (SELECT MAX(stat_minute) FROM realtime_order_minute) - INTERVAL 2 HOUR
+            ORDER BY stat_minute
             """)
-        minute_rows = list(reversed(minute_rows))
 
         # ---- 6) 最新 10 条异常订单（大屏告警列表）----
         abnormal_rows = query_all(
@@ -151,10 +153,13 @@ def eshop_data():
 
         # ---- 7) 预测结果（拓展任务，没有就返回空，不影响大屏）----
         try:
+            # 只取最新基准日那一批，避免历史快照混进来
             forecast_rows = query_all(
                 """
                 SELECT category, forecast_date, forecast_cnt
-                FROM ads_category_forecast ORDER BY forecast_date, category
+                FROM ads_category_forecast
+                WHERE dt = (SELECT MAX(dt) FROM ads_category_forecast)
+                ORDER BY forecast_date, category
                 """)
         except Exception:
             forecast_rows = []
