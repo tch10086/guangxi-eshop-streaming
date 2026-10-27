@@ -209,7 +209,7 @@ def write_mysql(batch_id, valid_cnt, valid_amount, abnormal_cnt,
 # ============================================================
 def process_batch(batch_df, batch_id: int, replay: bool = False):
     if batch_df.rdd.isEmpty():
-        print("[batch {}] 空批次，跳过".format(batch_id))
+        # 没有新数据就静默跳过：每 10 秒刷一行"空批次"会把演示画面弄乱
         return
 
     # ---------- 1) 去重 ----------
@@ -376,7 +376,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     spark = build_spark("GX_Eshop_Streaming")
-    spark.sparkContext.setLogLevel("WARN")
+    # 日志只留 ERROR：WARN 级别的 HDFSBackedStateStoreProvider 会在每个微批刷一行，
+    # 把 process_batch 打印的批次结果淹掉
+    spark.sparkContext.setLogLevel("ERROR")
 
     if args.mode == "stream":
         run_stream(spark, once=args.once)

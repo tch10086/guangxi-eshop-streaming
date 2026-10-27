@@ -182,7 +182,8 @@ def main():
     args = parser.parse_args()
 
     spark = build_spark()
-    spark.sparkContext.setLogLevel("WARN")
+    # 只留 ERROR，避免 Hive/Spark 的 WARN 刷屏把 ETL 结果行淹掉
+    spark.sparkContext.setLogLevel("ERROR")
     try:
         run(spark, args.dt)
         print("\n=== 离线 ETL 全部完成 ===")

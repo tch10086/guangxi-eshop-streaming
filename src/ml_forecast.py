@@ -95,11 +95,16 @@ def forecast_category(series: pd.DataFrame, days: int):
     last_dt = series["dt"].max()
     hist = list(series.sort_values("dt")["cnt"].values)
     preds = []
+    # 上下界约束：促销/补数会让某天销量突然翻几倍，线性回归会顺着尖峰外推出
+    # 离谱值（甚至负数）。用近 7 天均值给一个 0.3~1.8 倍的合理区间。
+    recent_mean = max(float(np.mean(hist[-7:])), 1.0)
+    lo, hi = int(recent_mean * 0.3), int(recent_mean * 1.8)
     for step in range(1, days + 1):
         t = len(hist)
         weekday = (last_dt + timedelta(days=step)).weekday()
         x = np.array([[t, weekday, hist[-1], hist[-2]]])
-        p = max(int(round(float(model.predict(x)[0]))), 0)
+        p = int(round(float(model.predict(x)[0])))
+        p = max(lo, min(p, hi))
         preds.append(p)
         hist.append(p)
     return preds, float(mae), len(feat)
