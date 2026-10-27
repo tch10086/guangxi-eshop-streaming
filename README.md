@@ -125,10 +125,17 @@ python src/ml_forecast.py --days 3
 # 5) Flask 接口
 python src/flask_server.py
 
-# 6) 浏览器打开大屏
-#   直接双击 dashboard/dashboard.html，或
-python -m http.server 8080 --directory dashboard   # 然后访问 http://localhost:8080/dashboard.html
+# 6) 打开大屏（两种方式都行，前提是 Flask 已在跑）
+#   方式一（推荐）：用 http 服务打开
+python -m http.server 8000 --directory dashboard
+#        然后访问 http://<部署机IP>:8000/dashboard.html
+#   方式二：直接双击 dashboard.html
+#        此时页面用文件顶部 API_HOST 指向的后端（默认 192.168.100.100:5000）
 ```
+
+> 大屏的接口地址有两处规则：通过 http 打开时自动把端口换成 5000；
+> 双击本地文件（file://）打开时用 `dashboard.html` 里的 `API_HOST`。
+> 换机器部署时改 `API_HOST` 即可，也可在地址后加 `?api=http://IP:5000/api/eshop_data` 临时覆盖。
 
 ### 5.3 需要修改的配置项
 
@@ -140,6 +147,7 @@ python -m http.server 8080 --directory dashboard   # 然后访问 http://localho
 | `src/flask_server.py` | `DB_CONFIG` | gx_ec_mysql / root / 123456 |
 | `src/ml_forecast.py` | `DB_CONFIG` | 同上 |
 | `scripts/install_env.sh` | `MYSQL_ROOT_PWD` | 123456 |
+| `dashboard/dashboard.html` | `API_HOST` | 192.168.100.100:5000 |
 
 ## 六、验收方法
 

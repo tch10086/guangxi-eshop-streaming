@@ -134,7 +134,7 @@
 <header>
   <h1>广西特色农产品电商实时监控大屏<span class="badge">Spark + Kafka 流批一体</span></h1>
   <div class="meta">
-    <span id="authorTag">Spark + Kafka 流批一体</span>
+    <span id="authorTag">v1.0</span>
     <span><span class="dot" id="statusDot"></span><span id="statusText">连接中…</span></span>
     <span id="clock">--:--:--</span>
   </div>
@@ -206,9 +206,20 @@
 
 <script>
 /* ============ 全局配置 ============ */
-const API = (window.location.protocol === 'file:')
-  ? 'http://127.0.0.1:5000/api/eshop_data'
-  : window.location.origin.replace(/:\d+$/, ':5000') + '/api/eshop_data';
+// 后端地址：换成你部署 Flask 的那台机器 IP
+const API_HOST = '192.168.100.100:5000';
+// 也可用 ?api=http://192.168.1.50:5000/api/eshop_data 临时覆盖，免改代码
+function resolveApi() {
+  const q = new URLSearchParams(window.location.search).get('api');
+  if (q) return q;
+  // 双击本地 html 打开（file://）时没有 origin，直接用 API_HOST
+  if (window.location.protocol === 'file:') {
+    return 'http://' + API_HOST + '/api/eshop_data';
+  }
+  // 通过 http 服务打开时，把端口换成 Flask 的 5000
+  return window.location.origin.replace(/:\d+$/, ':5000') + '/api/eshop_data';
+}
+const API = resolveApi();
 const REFRESH_MS = 3000;
 
 /* ============ 图表初始化 ============ */
@@ -387,7 +398,9 @@ async function fetchData() {
     if (failCount >= 3) {
       const t = document.getElementById('toast');
       t.style.display = 'block';
-      t.textContent = '接口请求失败：' + API + '（确认 Flask 已启动）';
+      t.textContent = '接口请求失败：' + API +
+        '（排查：① Flask 是否启动 ② 双击打开 html 时改用 http://' + API_HOST.replace(':5000', ':8000') +
+        '/dashboard.html 访问）';
     }
   }
 }
