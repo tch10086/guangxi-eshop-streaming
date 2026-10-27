@@ -1,0 +1,40 @@
+# ---------- 安装包 / 大文件（不入库）----------
+software/
+*.tar.gz
+*.tgz
+*.iso
+*.rpm
+*.jar
+
+# ---------- 交给老师的产物：含学号姓名，不进公开仓库 ----------
+submission/
+docs/report/
+docs/ppt/
+
+# ---------- 本机开发工具（报告/PPT/截图生成、虚拟机传输）----------
+tools/
+
+# ---------- 运行缓存与日志 ----------
+__pycache__/
+*.py[cod]
+.venv/
+.env
+checkpoint/
+spark-warehouse/
+metastore_db/
+derby.log
+*.log
+logs/
+nohup.out
+
+# ---------- IDE / 系统 ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- Office 临时文件 ----------
+~$*.docx
+~$*.pptx
+~$*.xlsx

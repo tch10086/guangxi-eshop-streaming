@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>广西特色农产品电商实时监控大屏</title>
+<!-- ECharts：主源失败自动切备用源，保证离线演示也能出图 -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+  if (typeof echarts === 'undefined') {
+    document.write('<script src="https://unpkg.com/echarts@5.4.3/dist/echarts.min.js"><\/script>');
+  }
+</script>
+<script>
+  if (typeof echarts === 'undefined') {
+    document.write('<script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"><\/script>');
+  }
+</script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #060d1f;
+    --panel: rgba(16, 38, 76, .55);
+    --line: #1d4b8f;
+    --accent: #4ac7ff;
+    --accent2: #38de9f;
+    --warn: #ff7b7b;
+    --text: #e8f2ff;
+    --muted: #7fa5cc;
+  }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #123b74 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    min-height: 100vh;
+    padding: 18px 22px 22px;
+    overflow-x: hidden;   /* 防止栅格被图表挤出横向滚动条 */
+  }
+  /* 顶部标题栏 */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: 14px; margin-bottom: 16px;
+    border-bottom: 1px solid rgba(74, 199, 255, .25);
+  }
+  h1 {
+    font-size: 26px; letter-spacing: 3px; font-weight: 700; color: #fff;
+    text-shadow: 0 0 18px rgba(74, 199, 255, .75);
+    display: flex; align-items: center; gap: 12px;
+  }
+  h1 .badge {
+    font-size: 12px; letter-spacing: 1px; font-weight: 400; color: var(--accent);
+    border: 1px solid rgba(74, 199, 255, .45); border-radius: 20px;
+    padding: 3px 10px; text-shadow: none;
+  }
+  .meta { display: flex; align-items: center; gap: 18px; font-size: 13px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent2);
+         display: inline-block; margin-right: 6px; box-shadow: 0 0 10px var(--accent2); }
+  .dot.off { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+  #clock { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+  /* 栅格 */
+  .row { display: grid; gap: 14px; margin-bottom: 14px; }
+  /* minmax(0,1fr)：图表默认 min-width:auto，用 1fr 会被内容撑破 */
+  .row.kpi  { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .row.main { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr); }
+  .row.bottom { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr); }
+  .row.forecast { grid-template-columns: minmax(0, 1fr); }
+  .card { min-width: 0; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(6px);
+  }
+  .card::before {
+    content: ""; position: absolute; left: 0; top: 0; width: 3px; height: 100%;
+    background: linear-gradient(180deg, var(--accent), transparent);
+  }
+  .card h3 {
+    font-size: 14px; font-weight: 500; color: #9cc8ef; margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .card h3 small { color: var(--muted); font-weight: 400; }
+
+  /* KPI 数字 */
+  .kpi-card { display: flex; flex-direction: column; justify-content: space-between; min-height: 108px; }
+  .kpi-value {
+    font-size: 34px; font-weight: 700; line-height: 1.1;
+    font-variant-numeric: tabular-nums; letter-spacing: 1px;
+  }
+  .kpi-value.c1 { color: #4ac7ff; text-shadow: 0 0 22px rgba(74,199,255,.45); }
+  .kpi-value.c2 { color: #38de9f; text-shadow: 0 0 22px rgba(56,222,159,.4); }
+  .kpi-value.c3 { color: #ffd166; text-shadow: 0 0 22px rgba(255,209,102,.35); }
+  .kpi-value.c4 { color: #ff8b8b; text-shadow: 0 0 22px rgba(255,139,139,.35); }
+  .kpi-unit { font-size: 14px; color: var(--muted); margin-left: 4px; }
+  .kpi-sub { font-size: 12px; color: var(--muted); }
+
+  .chart { height: 268px; width: 100%; }
+  .chart.tall { height: 300px; }
+
+  /* 告警列表 */
+  .warn-list { height: 300px; overflow-y: auto; padding-right: 4px; }
+  .warn-list::-webkit-scrollbar { width: 5px; }
+  .warn-list::-webkit-scrollbar-thumb { background: #23558f; border-radius: 3px; }
+  .warn-item {
+    display: grid; grid-template-columns: 92px 1fr auto; gap: 10px;
+    align-items: center; padding: 9px 10px; margin-bottom: 7px;
+    background: rgba(255, 90, 90, .07);
+    border-left: 2px solid var(--warn); border-radius: 4px;
+    font-size: 12.5px;
+  }
+  .warn-item .reason { color: var(--warn); font-weight: 600; }
+  .warn-item .oid { color: #9cc8ef; font-family: Consolas, monospace; font-size: 11.5px; }
+  .warn-item .detail { color: var(--muted); font-size: 11.5px; }
+  .warn-item .amt { color: #ffd166; font-weight: 600; }
+  .empty { color: #5b7fa6; text-align: center; padding: 40px 0; font-size: 13px; }
+  .toast {
+    position: fixed; right: 26px; bottom: 20px; z-index: 99;
+    background: rgba(255, 90, 90, .14); border: 1px solid var(--warn);
+    color: #ffb3b3; padding: 9px 16px; border-radius: 6px; font-size: 13px;
+    display: none;
+  }
+  @media (max-width: 1400px) {
+    .row.kpi { grid-template-columns: repeat(2, 1fr); }
+    .row.main, .row.bottom { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>广西特色农产品电商实时监控大屏<span class="badge">Spark + Kafka 流批一体</span></h1>
+  <div class="meta">
+    <span id="authorTag">Spark + Kafka 流批一体</span>
+    <span><span class="dot" id="statusDot"></span><span id="statusText">连接中…</span></span>
+    <span id="clock">--:--:--</span>
+  </div>
+</header>
+
+<!-- 第一行：实时 KPI -->
+<div class="row kpi">
+  <div class="card kpi-card">
+    <h3>实时成交总额 <small>累计</small></h3>
+    <div class="kpi-value c1"><span id="totalAmount">0.00</span><span class="kpi-unit">元</span></div>
+    <div class="kpi-sub" id="updatedAt">等待数据…</div>
+  </div>
+  <div class="card kpi-card">
+    <h3>实时订单量 <small>累计</small></h3>
+    <div class="kpi-value c2"><span id="orderCnt">0</span><span class="kpi-unit">笔</span></div>
+    <div class="kpi-sub">最新批次写入 MySQL 实时表</div>
+  </div>
+  <div class="card kpi-card">
+    <h3>客单价 <small>成交额 / 订单量</small></h3>
+    <div class="kpi-value c3"><span id="avgPrice">0.00</span><span class="kpi-unit">元</span></div>
+    <div class="kpi-sub">口径：有效订单金额均值</div>
+  </div>
+  <div class="card kpi-card">
+    <h3>异常订单 <small>负金额 / 空地址 / ID缺失</small></h3>
+    <div class="kpi-value c4"><span id="abnormalCnt">0</span><span class="kpi-unit">笔</span></div>
+    <div class="kpi-sub">DWD 层清洗后单独落表</div>
+  </div>
+</div>
+
+<!-- 第二行 -->
+<div class="row main">
+  <div class="card">
+    <h3>近 5 日成交趋势 <small>离线 ADS 日报</small></h3>
+    <div id="chartDay" class="chart"></div>
+  </div>
+  <div class="card">
+    <h3>品类销量排行 <small>实时累计</small></h3>
+    <div id="chartCategory" class="chart"></div>
+  </div>
+  <div class="card">
+    <h3>地市订单分布 <small>实时累计</small></h3>
+    <div id="chartCity" class="chart"></div>
+  </div>
+</div>
+
+<!-- 第三行 -->
+<div class="row bottom">
+  <div class="card">
+    <h3>今日分钟级成交趋势 <small>实时</small></h3>
+    <div id="chartMinute" class="chart"></div>
+  </div>
+  <div class="card">
+    <h3>异常订单告警 <small>最近 10 条</small></h3>
+    <div class="warn-list" id="warnList">
+      <div class="empty">暂无异常订单</div>
+    </div>
+  </div>
+</div>
+
+<!-- 第四行：拓展任务 - 品类销量预测（有数据才显示） -->
+<div class="row forecast" id="forecastRow" style="display:none">
+  <div class="card">
+    <h3>品类销量预测（未来 3 天） <small>拓展任务 · LinearRegression</small></h3>
+    <div id="chartForecast" class="chart"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast">接口请求失败</div>
+
+<script>
+/* ============ 全局配置 ============ */
+const API = (window.location.protocol === 'file:')
+  ? 'http://127.0.0.1:5000/api/eshop_data'
+  : window.location.origin.replace(/:\d+$/, ':5000') + '/api/eshop_data';
+const REFRESH_MS = 3000;
+
+/* ============ 图表初始化 ============ */
+const charts = {};
+function initCharts() {
+  charts.day      = echarts.init(document.getElementById('chartDay'));
+  charts.category = echarts.init(document.getElementById('chartCategory'));
+  charts.city     = echarts.init(document.getElementById('chartCity'));
+  charts.minute   = echarts.init(document.getElementById('chartMinute'));
+  window.addEventListener('resize', () => Object.values(charts).forEach(c => c.resize()));
+}
+
+const AXIS = {
+  axisLine:  { lineStyle: { color: '#2a5588' } },
+  axisLabel: { color: '#8fb6da', fontSize: 11 },
+  splitLine: { lineStyle: { color: 'rgba(42,85,136,.35)' } },
+};
+
+/* ============ 渲染 ============ */
+function render(d) {
+  const rt = d.realtime || {};
+  document.getElementById('totalAmount').textContent = Number(rt.total_amount || 0).toFixed(2);
+  document.getElementById('orderCnt').textContent    = Number(rt.order_cnt || 0);
+  document.getElementById('avgPrice').textContent    = Number(rt.avg_price || 0).toFixed(2);
+  document.getElementById('abnormalCnt').textContent = Number(rt.abnormal_cnt || 0);
+  document.getElementById('updatedAt').textContent   = '更新于 ' + (d.updated || '--');
+
+  /* 1) 近5日：柱=订单量，线=成交额（双轴） */
+  const dt = d.dayTrend || { x: [], y: [], abnormal: [], orderCnt: [] };
+  charts.day.setOption({
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(9,24,48,.92)',
+               borderColor: '#1d4b8f', textStyle: { color: '#e8f2ff', fontSize: 12 } },
+    legend: { data: ['成交金额', '订单量'], textStyle: { color: '#8fb6da' },
+              bottom: 0, right: 0, itemWidth: 10, itemHeight: 8 },
+    grid: { left: 52, right: 52, top: 38, bottom: 46 },
+    xAxis: { type: 'category', data: dt.x, ...AXIS },
+    yAxis: [
+      { type: 'value', name: '金额(元)', nameTextStyle: { color: '#8fb6da' }, ...AXIS },
+      { type: 'value', name: '订单量',   nameTextStyle: { color: '#8fb6da' }, ...AXIS,
+        splitLine: { show: false } },
+    ],
+    series: [
+      { name: '成交金额', type: 'bar', data: dt.y, barWidth: '42%',
+        itemStyle: { borderRadius: [4, 4, 0, 0],
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: '#4ac7ff' }, { offset: 1, color: 'rgba(74,199,255,.18)' }]) } },
+      { name: '订单量', type: 'line', yAxisIndex: 1, data: dt.orderCnt,
+        smooth: true, symbolSize: 6,
+        itemStyle: { color: '#38de9f' }, lineStyle: { width: 2 } },
+    ],
+  });
+
+  /* 2) 品类排行：横向柱 */
+  const cat = (d.category || []).slice(0, 8).sort((a, b) => a.value - b.value);
+  charts.category.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
+               backgroundColor: 'rgba(9,24,48,.92)', borderColor: '#1d4b8f',
+               textStyle: { color: '#e8f2ff', fontSize: 12 } },
+    grid: { left: 82, right: 34, top: 14, bottom: 18 },
+    xAxis: { type: 'value', ...AXIS },
+    yAxis: { type: 'category', data: cat.map(i => i.name), ...AXIS,
+             axisLabel: { color: '#b7d5f2', fontSize: 12 } },
+    series: [{
+      type: 'bar', data: cat.map(i => i.value), barWidth: '55%',
+      label: { show: true, position: 'right', color: '#4ac7ff', fontSize: 11 },
+      itemStyle: { borderRadius: [0, 4, 4, 0],
+        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+          { offset: 0, color: 'rgba(56,176,222,.35)' }, { offset: 1, color: '#38b0de' }]) },
+    }],
+  });
+
+  /* 3) 地市分布：玫瑰图 */
+  charts.city.setOption({
+    tooltip: { trigger: 'item', backgroundColor: 'rgba(9,24,48,.92)',
+               borderColor: '#1d4b8f', textStyle: { color: '#e8f2ff', fontSize: 12 },
+               formatter: '{b}<br/>{c} 笔 ({d}%)' },
+    legend: { bottom: 0, textStyle: { color: '#8fb6da', fontSize: 11 }, itemWidth: 8, itemHeight: 8 },
+    color: ['#4ac7ff', '#38de9f', '#ffd166', '#ff8b8b', '#b48cff', '#5ad1d1', '#ff9f43'],
+    series: [{
+      type: 'pie', radius: ['32%', '62%'], center: ['50%', '44%'], roseType: 'radius',
+      data: d.area || [],
+      label: { color: '#b7d5f2', fontSize: 11, formatter: '{b} {d}%' },
+      labelLine: { lineStyle: { color: '#2a5588' } },
+      itemStyle: { borderColor: '#060d1f', borderWidth: 2 },
+    }],
+  });
+
+  /* 4) 分钟趋势：面积图 */
+  const mt = d.minuteTrend || { x: [], y: [] };
+  charts.minute.setOption({
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(9,24,48,.92)',
+               borderColor: '#1d4b8f', textStyle: { color: '#e8f2ff', fontSize: 12 } },
+    grid: { left: 52, right: 24, top: 20, bottom: 26 },
+    xAxis: { type: 'category', boundaryGap: false, data: mt.x, ...AXIS },
+    yAxis: { type: 'value', name: '成交额', nameTextStyle: { color: '#8fb6da' }, ...AXIS },
+    series: [{
+      type: 'line', data: mt.y, smooth: true, showSymbol: false,
+      lineStyle: { width: 2, color: '#4ac7ff' },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        { offset: 0, color: 'rgba(74,199,255,.45)' },
+        { offset: 1, color: 'rgba(74,199,255,.02)' }]) },
+    }],
+  });
+
+  /* 4.5) 拓展任务：品类销量预测 */
+  renderForecast(d.forecast || []);
+
+  /* 5) 异常告警列表 */
+  const list = d.abnormal || [];
+  const box = document.getElementById('warnList');
+  if (!list.length) {
+    box.innerHTML = '<div class="empty">暂无异常订单</div>';
+  } else {
+    box.innerHTML = list.map(it => `
+      <div class="warn-item">
+        <div class="reason">${esc(it.abnormal_reason || '异常')}</div>
+        <div>
+          <div class="oid">${esc(it.order_id || 'ID缺失')}</div>
+          <div class="detail">${esc(it.product_name || '-')} · ${esc(it.city || '-')} · ${esc(it.order_time || '')}</div>
+        </div>
+        <div class="amt">¥${Number(it.amount || 0).toFixed(2)}</div>
+      </div>`).join('');
+  }
+}
+
+/* ============ 拓展任务：品类销量预测图 ============ */
+function renderForecast(rows) {
+  if (!rows || !rows.length) return;
+  const rowBox = document.getElementById('forecastRow');
+  if (rowBox.style.display === 'none') {
+    rowBox.style.display = 'grid';
+    charts.forecast = echarts.init(document.getElementById('chartForecast'));
+  }
+  const dates = [...new Set(rows.map(r => r.forecast_date))].sort();
+  const cats = [...new Set(rows.map(r => r.category))];
+  const palette = ['#4ac7ff', '#38de9f', '#ffd166', '#ff8b8b', '#b48cff', '#5ad1d1', '#ff9f43', '#9ccc65'];
+
+  charts.forecast.setOption({
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(9,24,48,.92)',
+               borderColor: '#1d4b8f', textStyle: { color: '#e8f2ff', fontSize: 12 } },
+    legend: { textStyle: { color: '#8fb6da', fontSize: 11 }, top: 0 },
+    grid: { left: 48, right: 24, top: 40, bottom: 26 },
+    xAxis: { type: 'category', data: dates, ...AXIS },
+    yAxis: { type: 'value', name: '预测销量(笔)', nameTextStyle: { color: '#8fb6da' }, ...AXIS },
+    color: palette,
+    series: cats.map(c => ({
+      name: c, type: 'line', smooth: true, symbolSize: 6,
+      lineStyle: { type: 'dashed', width: 2 },
+      data: dates.map(dt => {
+        const hit = rows.find(r => r.category === c && r.forecast_date === dt);
+        return hit ? hit.forecast_cnt : null;
+      }),
+    })),
+  });
+  charts.forecast.resize();
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ============ 拉取数据 ============ */
+let failCount = 0;
+async function fetchData() {
+  try {
+    const res = await fetch(API, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    render(data);
+    failCount = 0;
+    setStatus(true);
+  } catch (e) {
+    failCount++;
+    console.error('接口请求失败：', e);
+    setStatus(false);
+    if (failCount >= 3) {
+      const t = document.getElementById('toast');
+      t.style.display = 'block';
+      t.textContent = '接口请求失败：' + API + '（确认 Flask 已启动）';
+    }
+  }
+}
+
+function setStatus(ok) {
+  document.getElementById('statusDot').className = 'dot' + (ok ? '' : ' off');
+  document.getElementById('statusText').textContent = ok ? '实时刷新中' : '连接失败';
+  if (ok) document.getElementById('toast').style.display = 'none';
+}
+
+function tickClock() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('clock').textContent =
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/* ============ 启动 ============ */
+window.addEventListener('load', () => {
+  initCharts();
+  tickClock();
+  setInterval(tickClock, 1000);
+  fetchData();
+  setInterval(fetchData, REFRESH_MS);
+});
+</script>
+</body>
+</html>

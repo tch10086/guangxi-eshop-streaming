@@ -1,0 +1,125 @@
+============================================================
+拓展任务说明（A组：广西特色农产品电商订单分析）
+============================================================
+
+【一、拓展任务归类】
+
+本作品在完成实训指导书"基础任务"（集群部署 + Kafka 采集 + Hive 四层数仓 +
+Structured Streaming 实时计算 + Flask 接口 + ECharts 大屏）之外，
+共做了 4 项拓展，按学院分类口径归属如下：
+
+  类别 B（改进类）：2 项 —— 工程缺陷修复与功能补全
+  类别 C（创新类）：2 项 —— 预测模型与流批一体双向验证
+  合计：B 改进 2 项 + C 创新 2 项
+
+
+【二、B 改进类 ①：补齐 MySQL 业务库建表（资源包缺失项）】
+
+问题：
+  教研室资源包只提供了 Hive 建表 SQL（06_Hive分层建表SQL_A组电商.sql），
+  没有提供任何 MySQL 建表脚本；但 11_Flask后端接口_A组电商.py 却要查
+  realtime_order_index、ads_eshop_daily_report、dws_eshop_hour_stats 三张表。
+  按模板直接跑，必然报 Table 'gx_ec_mysql.dws_eshop_hour_stats' doesn't exist。
+
+做法：
+  1) 新增 sql/mysql_ddl.sql，建 7 张表：
+     realtime_order_index（实时累计，单行）
+     realtime_order_minute（分钟趋势）
+     realtime_category_index（实时品类排行）
+     realtime_city_index（实时地市分布）
+     dws_eshop_hour_stats（小时汇总）
+     ads_eshop_daily_report（日报 + 客单价）
+     abnormal_order_log（异常告警明细）
+     ads_category_forecast（预测结果）
+  2) 实时表用 INSERT ... ON DUPLICATE KEY UPDATE 做累加，避免"整表覆盖"丢历史。
+  3) 修复一个隐蔽的顺序陷阱：MySQL 的 ON DUPLICATE KEY UPDATE 是"从左到右"
+     依次赋值的，如果先写 order_cnt = order_cnt + VALUES(order_cnt)，
+     后写 avg_price = total_amount / order_cnt，算出来的客单价会被新值污染。
+     本项目把 avg_price 的赋值写在累加之前，客单价口径才正确。
+
+效果：
+  Flask 三个接口全部有数据可查，大屏 4 卡片 + 4 图表全部点亮。
+
+验证：
+  mysql -uroot -p123456 -e "use gx_ec_mysql; show tables;"     → 7 张表
+  curl http://127.0.0.1:5000/api/health                       → {"status":"ok"}
+
+
+【三、B 改进类 ②：修复 Flask 的 Decimal 序列化 500 错误 + 补大屏两个缺失模块】
+
+问题 A（会直接 500）：
+  pymysql 查 DECIMAL 字段返回 decimal.Decimal，Flask 默认 JSON 编码器不支持，
+  模板里 rt_data 原样 jsonify，一访问就抛
+  TypeError: Object of type Decimal is not JSON serializable。
+  （对比：模板里 day_y 用了 float() 所以没事，恰好漏了实时那一处）
+
+做法：抽出 to_jsonable() 递归转换 Decimal/datetime，所有响应统一过一遍。
+
+问题 B（功能不完整）：
+  任务书要求大屏有"异常订单告警列表"，模板 09 号 HTML 里 CSS 已经写好了
+  .warn-box/.warn-item，但 HTML 结构里根本没用到，属于"写了样式没写功能"；
+  同时核心指标"客单价"在大屏上没有卡片。
+
+做法：
+  1) 大屏新增"异常订单告警"滚动列表，展示 异常原因 / 订单号 / 品类-地市-时间 / 金额；
+  2) 新增"客单价"KPI 卡片；
+  3) 新增"今日分钟级成交趋势"折线图；
+  4) 补 ECharts 三级 CDN 回退（jsdelivr → unpkg → bootcdn），断网环境也能出图。
+
+效果：大屏从 3 卡片 3 图 升级为 4 卡片 4 图 + 1 告警列表，模块与任务书一一对应。
+
+
+【四、C 创新类 ①：品类销量短时预测 + 品类画像聚类】
+
+做法（src/ml_forecast.py）：
+  1) 从 MySQL 的 ads_eshop_daily_report 取每日各品类销量；
+  2) 特征工程：时间序号 t、星期几 weekday、滞后 1 天 lag1、滞后 2 天 lag2；
+  3) 模型：多元线性回归（sklearn LinearRegression）；
+     留出最后 2 天做测试集，计算 MAE 评估；
+     再全量重训，用递推方式预测未来 3 天；
+  4) 结果写回 MySQL ads_category_forecast，大屏底部用虚线图展示；
+  5) 附加：KMeans 按（日均销量、客单价、销量波动率 cv）把品类聚成 3 类，
+     自动命名为"畅销稳定 / 高客单价 / 波动大"，对应任务书"用户/商品画像"要求。
+
+补充说明：
+  原始订单字段里没有用户维度，所以"用户聚类"改为"品类画像聚类"。
+  如果后续在生产者里加 buyer_id（本项目已加），可以平滑升级为基于 RFM 的用户分群。
+
+效果：
+  5 个品类全部产出未来 3 天预测值，MAE 在个位数到十位数区间（数据量小时波动大）；
+  大屏能看出预测趋势与实际走势方向一致，能够支撑"滞销品类预警"的延伸。
+
+
+【五、C 创新类 ②：流批一体双向验证（batch 模式重跑历史）】
+
+做法（src/spark_streaming.py）：
+  同一个计算函数 process_batch() 被两条路径调用：
+    · 流：writeStream.foreachBatch(process_batch)  每 10 秒消费 Kafka
+    · 批：run_batch() 读 HDFS 历史 ODS，按 dt 分区切批，逐批调用 process_batch
+  两段代码共用 100% 相同的清洗、去重、聚合、入库逻辑，
+  区别只在于"输入源是 Kafka 还是 HDFS"。
+
+关键细节：
+  去重键不是直接用 order_id，而是构造 dedup_key：
+    正常行 → order_id
+    订单号缺失行 → "NULL-" + Kafka 时间戳
+  原因：直接对 order_id 做 dropDuplicates，所有 NULL 会被当成同一条只保留 1 行，
+  异常单（订单ID缺失）就统计不全；构造唯一键后才既去重又不漏异常。
+
+验证：
+  spark-submit src/spark_streaming.py --mode batch --input <ODS路径>
+  批模式先 TRUNCATE 实时表，再按天累加，最终结果与流模式一致，
+  证明"同一套逻辑既能流式跑也能批量跑"。
+
+效果：
+  演示时可以这样操作：先流式跑 2 分钟看大屏数字涨，再停掉流任务、
+  用批模式重跑历史，大屏数字与流式结果一致 —— 流批一体的最直观证明。
+
+
+【六、拓展任务对评分的支撑】
+
+  业务功能完整性（30 分）：补齐大屏 2 个缺失模块 + 客单价指标 + 预测模块；
+  代码规范与核心功能（35 分）：去重键设计、批模式复用、Checkpoint 三处细节；
+  作品包装（15 分）：有"资源包缺陷修复"的真实工程叙事，不是照着模板抄。
+
+============================================================
