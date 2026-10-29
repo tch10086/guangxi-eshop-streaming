@@ -27,6 +27,10 @@ derby.log
 logs/
 nohup.out
 
+# ---------- 生成的订单明细（可由脚本重建，不入库）----------
+data/orders/
+data/orders_pack.tgz
+
 # ---------- IDE / 系统 ----------
 .vscode/
 .idea/

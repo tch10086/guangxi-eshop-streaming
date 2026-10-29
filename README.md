@@ -12,12 +12,27 @@
 系统的核心是 **流批一体**：同一份计算逻辑（`process_batch`），既能作为流任务持续消费 Kafka，
 也能作为批任务重跑历史数据，做到"一套代码，两种跑法"。
 
+### 数据来源与真实性
+
+价格不编造，来自公开数据；订单笔数按任务书规则构造。具体分工：
+
+| 数据项 | 来源 | 说明 |
+| --- | --- | --- |
+| 品种日批发价 | 北京新发地批发市场公开价格接口 | 沃柑 / 耙耙柑 / 脐橙 / 砂糖橘，2024-01 至 2026-10 共 1998 条原始记录 |
+| 研究窗口 | 取四品种均有连续报价的 2024-03 | 清洗归并后 116 条「品类 × 日」价格 |
+| 订单金额 | 真实日均价 × 件重（3/5/10/20 斤） | 单价完全来自真实报价 |
+| 订单笔数 / 地市 / 地址 | 按权重与规则构造 | 地市按广西 14 市柑橘产区权重分配 |
+| 异常单 / 重复单号 / 迟到 | 主动注入（4% / 3% / 6%） | 用于演示清洗、去重与水印 |
+
+> 演示时把 2024-03 的行情整体平移到最近 30 天，价格数值本身不变；这样大屏展示的是"近期日期 + 真实价格"。
+> 原始数据与清洗脚本见 `data/raw/`、`data/clean/` 与 `tools/`。
+
 ## 二、系统架构
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  数据生产层   kafka_producer.py                              │
-│  模拟订单 JSON 流（含异常单 / 重复单号 / 迟到数据注入）        │
+│  基于新发地真实日价格回放订单（含异常单 / 重复单号 / 迟到注入） │
 └───────────────────────────┬──────────────────────────────────┘
                             │ JSON
 ┌───────────────────────────▼──────────────────────────────────┐
@@ -60,7 +75,7 @@
 ```
 .
 ├── src/
-│   ├── kafka_producer.py     # 订单生产者（异常/重复单/迟到数据注入）
+│   ├── kafka_producer.py     # 订单回放器（真实日价格驱动 + 异常/重复/迟到注入）
 │   ├── spark_streaming.py    # 流批一体主任务（水印 + Checkpoint + ForeachBatch）
 │   ├── offline_etl.py        # SparkSQL 离线数仓 ETL
 │   ├── ml_forecast.py        # 品类销量预测 + 品类聚类
@@ -109,8 +124,11 @@ Zookeeper → Kafka → HDFS → YARN → Hive Metastore → MySQL
 ```
 
 ```bash
-# 1) 生产者：持续产生订单流
-python src/kafka_producer.py --ip 192.168.100.100 --total 500
+# 1) 回放今天真实行情对应的订单（默认 12 条/秒）
+python src/kafka_producer.py --mode stream --rate 12
+
+#    生成离线用的历史订单 TSV（前 30 天，dt= 分区）
+python src/kafka_producer.py --mode batch --out data/orders
 
 # 2) 流任务：消费 Kafka，实时指标写 MySQL
 spark-submit --master local[2] src/spark_streaming.py --mode stream
@@ -145,7 +163,7 @@ python -m http.server 8000 --directory dashboard
 
 | 位置 | 配置项 | 默认值 |
 | --- | --- | --- |
-| `src/kafka_producer.py` | `DEFAULT_IP` | 192.168.100.100 |
+| `src/kafka_producer.py` | `KAFKA_IP` / `PRICE_CSV` | 192.168.100.100 / data/clean/daily_price.csv |
 | `src/spark_streaming.py` | `CONFIG.kafka_bootstrap` / `CONFIG.mysql` | 192.168.100.100:9092 / :3306 |
 | `src/offline_etl.py` | `CONFIG.mysql` | 同上 |
 | `src/flask_server.py` | `DB_CONFIG` | gx_ec_mysql / root / 123456 |
@@ -223,10 +241,11 @@ python -m http.server 8000 --directory dashboard
 | 集群进程 | NameNode / DataNode / SecondaryNameNode / ResourceManager / NodeManager / QuorumPeerMain(ZK) / Kafka / RunJar(Hive Metastore) 共 8 个 Java 进程 |
 | Kafka Topic | `guangxi-eshop-stream`，1 分区 1 副本，Leader=0，ISR=0 |
 | Hive 四层 | 6 张表：ods_eshop_order、dwd_eshop_order_valid、dwd_eshop_order_abnormal、dws_eshop_hour_stats、ads_eshop_daily_report、ads_category_forecast |
-| 离线分区 | ODS/DWD/DWS/ADS 共 11 个 dt 分区（2026-10-16 ~ 2026-10-26），单日 DWD 有效单 260~416 行 |
-| 实时指标 | 累计 160 单 / 成交 28068.89 元 / 异常 11 单 / 客单价 175.43 元 |
-| 分钟趋势 | 5 个分钟点（20:13 ~ 20:35） |
-| 预测结果 | 12 行（4 品类 × 未来 3 天），写入 ads_category_forecast |
+| 离线分区 | ODS/DWD/DWS/ADS 共 30 个 dt 分区（2026-09-29 ~ 2026-10-28），单日 DWD 有效单 380~470 行 |
+| 离线汇总 | 30 天共 11,933 单 / 成交 350,795.49 元；品类：沃柑 4085、脐橙 3128、耙耙柑 3038、砂糖橘 1682 |
+| 实时指标 | 累计 313 单 / 成交 8385.34 元 / 异常 15 单 / 客单价 26.79 元 |
+| 分钟趋势 | 按分钟滚动累加，随回放持续新增 |
+| 预测结果 | 12 行（4 品类 × 未来 3 天），MAE 6.5~17.7，写入 ads_category_forecast |
 | 接口 | `/api/health` 返回 status=ok 且列出 8 张表；`/api/eshop_data` 正常返回 JSON |
 | 大屏 | 4 张指标卡 + 4 张图 + 异常告警列表全部有数据，3 秒刷新 |
 
@@ -234,5 +253,5 @@ python -m http.server 8000 --directory dashboard
 
 ## 十一、说明
 
-- 数据全部由 `kafka_producer.py` 仿真生成，不含任何真实用户信息。
+- 订单价格来自北京新发地批发市场的公开日价格接口，来源为公开行情，不含任何真实用户信息；订单笔数、地市分布、地址与异常单为按任务书规则构造。
 - 单机伪分布式配置，副本数均为 1，仅用于学习与小规模验证；生产环境需按集群规模调整分区、副本与内存参数。

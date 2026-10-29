@@ -73,8 +73,12 @@ def build_features(series: pd.DataFrame) -> pd.DataFrame:
     return s.dropna().reset_index(drop=True)
 
 
-def forecast_category(series: pd.DataFrame, days: int):
-    """单品类：返回 (未来 days 天预测值列表, MAE, 样本数)"""
+def forecast_category(series: pd.DataFrame, days: int, anchor_dt):
+    """单品类：返回 (未来 days 天预测值列表, MAE, 样本数)
+
+    anchor_dt 是全表统一基准日：有的品类（比如砂糖橘）最近几天没有报价，
+    如果按它自己的最后一天往后推，预测日期会落回过去，大屏就会出现两段日期。
+    """
     feat = build_features(series)
     if len(feat) < MIN_DAYS:
         return None
@@ -92,7 +96,7 @@ def forecast_category(series: pd.DataFrame, days: int):
 
     # 全量重训 + 递推预测
     model = LinearRegression().fit(X, y)
-    last_dt = series["dt"].max()
+    last_dt = anchor_dt
     hist = list(series.sort_values("dt")["cnt"].values)
     preds = []
     # 上下界约束：促销/补数会让某天销量突然翻几倍，线性回归会顺着尖峰外推出
@@ -184,20 +188,20 @@ def main():
 
     rows = []
     print("\n--- 各品类预测结果 ---")
+    anchor = df["dt"].max()
     for cat, sub in df.groupby("category"):
-        res = forecast_category(sub, args.days)
+        res = forecast_category(sub, args.days, anchor)
         if res is None:
             print("  {:10s} 数据不足（<{}天），跳过".format(cat, MIN_DAYS + 2))
             continue
         preds, mae, n = res
-        last_dt = sub["dt"].max()
         print("  {:10s} 样本{:3d}  MAE={:6.2f}  预测：{}".format(
             cat, n, mae,
-            ", ".join("{}={}".format((last_dt + timedelta(days=i + 1)).strftime("%m-%d"), p)
+            ", ".join("{}={}".format((anchor + timedelta(days=i + 1)).strftime("%m-%d"), p)
                       for i, p in enumerate(preds))))
         for i, p in enumerate(preds):
             rows.append((base_dt, cat,
-                         (last_dt + timedelta(days=i + 1)).strftime("%Y-%m-%d"),
+                         (anchor + timedelta(days=i + 1)).strftime("%Y-%m-%d"),
                          p, "LinearRegression", round(mae, 2)))
 
     save_forecast(rows, base_dt)
