@@ -136,6 +136,8 @@
   <div class="meta">
     <span id="authorTag">v1.0</span>
     <span><span class="dot" id="statusDot"></span><span id="statusText">连接中…</span></span>
+    <span id="lastOk">上次成功 —</span>
+    <span id="countdown">3s 后刷新</span>
     <span id="clock">--:--:--</span>
   </div>
 </header>
@@ -381,29 +383,53 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-/* ============ 拉取数据 ============ */
-let failCount = 0;
+/* ============ 拉取数据（自调度 + 超时保护，保证一直在刷新） ============ */
+let failCount = 0, nextAt = 0, timer = null;
+const $id = s => document.getElementById(s);
+
 async function fetchData() {
+  const ctrl = new AbortController();
+  const guard = setTimeout(() => ctrl.abort(), 5000);   // 单次最多等 5 秒，避免卡住整个循环
   try {
-    const res = await fetch(API, { cache: 'no-store' });
+    const res = await fetch(API, { cache: 'no-store', signal: ctrl.signal });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     render(data);
     failCount = 0;
     setStatus(true);
+    $id('lastOk').textContent = '上次成功 ' +
+      new Date().toLocaleTimeString('zh-CN', { hour12: false });
   } catch (e) {
     failCount++;
     console.error('接口请求失败：', e);
     setStatus(false);
     if (failCount >= 3) {
-      const t = document.getElementById('toast');
+      const t = $id('toast');
       t.style.display = 'block';
-      t.textContent = '接口请求失败：' + API +
-        '（排查：① Flask 是否启动 ② 双击打开 html 时改用 http://' + API_HOST.replace(':5000', ':8000') +
-        '/dashboard.html 访问）';
+      t.textContent = '接口请求失败：' + API + '（第 ' + failCount + ' 次，仍在自动重试）';
     }
+  } finally {
+    clearTimeout(guard);
   }
 }
+
+/* 自调度：上一次请求结束后才排下一次，网络慢也不会堆积；失败也继续排 */
+function scheduleNext() {
+  clearTimeout(timer);
+  const delay = failCount === 0 ? REFRESH_MS : Math.min(REFRESH_MS * 2, 10000);
+  nextAt = Date.now() + delay;
+  timer = setTimeout(async () => { await fetchData(); scheduleNext(); }, delay);
+}
+
+function tickCountdown() {
+  const left = Math.max(0, Math.ceil((nextAt - Date.now()) / 1000));
+  $id('countdown').textContent = left + 's 后刷新';
+}
+
+/* 切回标签页立刻补刷一次（后台标签浏览器会降频，回来先同步） */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') fetchData().then(scheduleNext);
+});
 
 function setStatus(ok) {
   document.getElementById('statusDot').className = 'dot' + (ok ? '' : ' off');
@@ -423,8 +449,8 @@ window.addEventListener('load', () => {
   initCharts();
   tickClock();
   setInterval(tickClock, 1000);
-  fetchData();
-  setInterval(fetchData, REFRESH_MS);
+  setInterval(tickCountdown, 500);
+  fetchData().then(scheduleNext);
 });
 </script>
 </body>

@@ -42,3 +42,7 @@ desktop.ini
 ~$*.docx
 ~$*.pptx
 ~$*.xlsx
+
+# 外部参考项目（不入库）
+online_edu/
+out/

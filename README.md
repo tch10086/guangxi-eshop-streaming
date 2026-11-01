@@ -87,9 +87,9 @@
 │   └── dashboard.html        # ECharts 大屏（单文件）
 ├── scripts/
 │   ├── install_env.sh        # 一键安装整套环境
-│   ├── boot_all.sh           # 一键拉起全栈（含 Flask 与大屏）
+│   ├── boot_all.sh           # 旧入口，已转发到根目录 start.sh
 │   ├── run_demo.sh           # 一键恢复演示态（流任务 + 生产者 + 可选 ETL）
-│   ├── start_all.sh          # 只启动大数据组件
+│   ├── start_all.sh          # 只启动大数据组件（内部使用）
 │   └── stop_all.sh           # 反向停止
 ├── docs/
 │   ├── 部署手册.md            # 环境部署 + 启动 + 验收 + 故障排查
@@ -108,8 +108,8 @@
 # 1) 安装包放到 /opt/software/ 后，一键装环境
 sudo bash scripts/install_env.sh
 
-# 2) 启动全部组件（机器重启后用这个，会连 Flask 与大屏一起拉起）
-bash scripts/boot_all.sh
+# 2) 一键启动全部（组件 + 接口 + 大屏 + 流任务 + 订单回放）
+bash start.sh                # 不想让数字增长就加 --no-producer
 
 # 3) 隔天再来看，实时数字不动了？一条命令恢复演示态（流任务 + 生产者 + 补今天的 ETL）
 bash scripts/run_demo.sh 300 --etl
