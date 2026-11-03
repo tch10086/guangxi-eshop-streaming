@@ -115,6 +115,21 @@ bash start.sh                # 不想让数字增长就加 --no-producer
 bash scripts/run_demo.sh 300 --etl
 ```
 
+### 5.1.1 宿主机与虚拟机的分工（常见误区）
+
+`start.sh` 是**虚拟机里**的脚本，不能在 Windows 上双击运行，也不需要放进虚拟机目录：
+
+| 层级 | 在哪运行 | 干什么 | 用什么 |
+| --- | --- | --- | --- |
+| 宿主机（Windows） | CMD / 资源管理器 | 给虚拟机开机、等 SSH 通 | `vmrun` + 启动 BAT |
+| 虚拟机（CentOS） | SSH 进去后 | 起 HDFS/Kafka/Hive/MySQL/Flask/大屏/流任务 | `bash start.sh` |
+
+把 `start.sh` 放到 `.vmx` 旁边不会自动执行——VMware 不会运行虚拟机目录里的脚本，
+而且脚本里的 `jps`、`systemctl`、`/etc/profile.d/bigdata.sh` 只有 CentOS 里才有。
+
+想要"桌面双击一下就全起来"，用项目外层的两个 BAT：
+`启动大数据项目.bat` / `关闭大数据项目.bat`（它们负责开机 + SSH 调 `start.sh`）。
+
 ### 5.2 启动顺序（必须按此顺序，否则会连不上）
 
 ```
