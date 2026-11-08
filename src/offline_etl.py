@@ -138,20 +138,35 @@ def run(spark, target_dt: str):
         """.format(dt=dt))
 
         # ---------------- DWS：小时 × 品类 × 地市 ----------------
+        # 有效单与异常单分别聚合后 UNION，再按 (小时,品类,地市) 求和。
+        # 不能用「有效单 LEFT JOIN 异常数」：
+        #   1) 异常按整天聚合会随小时数重复累加（ADS 里 SUM 后翻倍）；
+        #   2) 只出现在异常里的品类/地市会因 LEFT JOIN 匹配不上而整批丢掉。
         spark.sql("""
             INSERT OVERWRITE TABLE dws_eshop_hour_stats PARTITION (dt='{dt}')
-            SELECT v.order_hour AS hour, v.category, v.city,
-                   COUNT(*) AS order_cnt,
-                   ROUND(SUM(v.amount), 2) AS total_amount,
-                   COALESCE(a.abnormal_cnt, 0) AS abnormal_cnt
-            FROM dwd_eshop_order_valid v
-            LEFT JOIN (
-                SELECT category, city, COUNT(*) AS abnormal_cnt
-                FROM dwd_eshop_order_abnormal WHERE dt='{dt}'
-                GROUP BY category, city
-            ) a ON v.category = a.category AND v.city = a.city
-            WHERE v.dt='{dt}'
-            GROUP BY v.order_hour, v.category, v.city, a.abnormal_cnt
+            SELECT hour, category, city,
+                   SUM(order_cnt)    AS order_cnt,
+                   ROUND(SUM(total_amount), 2) AS total_amount,
+                   SUM(abnormal_cnt) AS abnormal_cnt
+            FROM (
+                SELECT v.order_hour AS hour, v.category, v.city,
+                       COUNT(*) AS order_cnt, SUM(v.amount) AS total_amount,
+                       0 AS abnormal_cnt
+                FROM dwd_eshop_order_valid v
+                WHERE v.dt='{dt}'
+                GROUP BY v.order_hour, v.category, v.city
+
+                UNION ALL
+
+                SELECT COALESCE(substr(order_time, 12, 2), '00') AS hour,
+                       category, city,
+                       0 AS order_cnt, CAST(0 AS DOUBLE) AS total_amount,
+                       COUNT(*) AS abnormal_cnt
+                FROM dwd_eshop_order_abnormal
+                WHERE dt='{dt}'
+                GROUP BY COALESCE(substr(order_time, 12, 2), '00'), category, city
+            ) t
+            GROUP BY hour, category, city
         """.format(dt=dt))
 
         # ---------------- ADS：天 × 品类 × 地市 + 客单价 ----------------
